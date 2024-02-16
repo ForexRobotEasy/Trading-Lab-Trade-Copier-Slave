@@ -1,0 +1,147 @@
+mql5
+//+------------------------------------------------------------------+
+//|                      Trading Lab Trade Copier Slave               |
+//|                Developed by Forex Robot Easy Team                 |
+//|                      www.forexroboteasy.com                        |
+//+------------------------------------------------------------------+
+
+#include <Trade\Trade.mqh>
+
+//+------------------------------------------------------------------+
+//| Global Variables                                                 |
+//+------------------------------------------------------------------+
+CTrade trade; // Trade object for executing trades
+
+//+------------------------------------------------------------------+
+//| Expert initialization function                                   |
+//+------------------------------------------------------------------+
+int OnInit()
+{
+   // Establish a connection to the master terminal
+   if(!trade.Connect('MasterTerminalIP', 12345))
+   {
+      Print('Failed to connect to the master terminal!');
+      return INIT_FAILED;
+   }
+
+   // Subscribe to trade signals from the master terminal
+   if(!trade.SubscribeToTradeSignals())
+   {
+      Print('Failed to subscribe to trade signals!');
+      return INIT_FAILED;
+   }
+
+   return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| Expert deinitialization function                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   // Close the connection to the master terminal
+   trade.Disconnect();
+}
+
+//+------------------------------------------------------------------+
+//| Expert tick function                                             |
+//+------------------------------------------------------------------+
+void OnTick()
+{
+   // Check for new trade signals from the master terminal
+   if(trade.CheckForTradeSignals())
+   {
+      // Get the trade signals
+      MqlTradeSignal signal;
+      while(trade.GetNextTradeSignal(signal))
+      {
+         // Copy the trade signal to the slave terminals
+         CopyTradeSignalToSlaves(signal);
+      }
+   }
+
+   // Monitor and update stop loss and take profit levels on slave terminals
+   MonitorStopLossAndTakeProfit();
+}
+
+//+------------------------------------------------------------------+
+//| Copy trade signal to slave terminals                              |
+//+------------------------------------------------------------------+
+void CopyTradeSignalToSlaves(const MqlTradeSignal& signal)
+{
+   // Execute the trade on each slave terminal
+   for(int i = 0; i < NumberOfSlaveTerminals; i++)
+   {
+      // Calculate the trade size for each slave terminal
+      double lotSize = CalculateLotSize(signal);
+
+      // Execute the trade on the slave terminal
+      if(!trade.ExecuteTrade(signal.action, signal.symbol, lotSize, signal.price))
+      {
+         Print('Failed to execute trade on slave terminal ', i+1);
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate lot size for slave terminals                            |
+//+------------------------------------------------------------------+
+double CalculateLotSize(const MqlTradeSignal& signal)
+{
+   // Calculate the lot size based on the desired risk percentage
+   double riskPercentage = 0.01; // 1% risk per trade
+   double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double stopLoss = signal.stoploss;
+   double lotSize = (accountBalance * riskPercentage) / stopLoss;
+
+   return NormalizeDouble(lotSize, MarketInfo(signal.symbol, MODE_LOTSIZE));
+}
+
+//+------------------------------------------------------------------+
+//| Monitor and update stop loss and take profit levels on slaves     |
+//+------------------------------------------------------------------+
+void MonitorStopLossAndTakeProfit()
+{
+   // Get the open positions on the slave terminals
+   MqlTradeRequest request;
+   request.action = TRADE_ACTION_SLTP;
+   request.symbol = Symbol();
+   request.type = ORDER_TYPE_BUY | ORDER_TYPE_SELL;
+   request.magic = MagicNumber;
+
+   if(!trade.GetPositions(request))
+   {
+      Print('Failed to get positions from slave terminals!');
+      return;
+   }
+
+   // Update stop loss and take profit levels on the slave terminals
+   for(int i = 0; i < trade.PositionsTotal(); i++)
+   {
+      if(!trade.UpdatePositionSLTP(request, trade.PositionGetDouble(POSITION_SL), trade.PositionGetDouble(POSITION_TP)))
+      {
+         Print('Failed to update stop loss and take profit levels on slave terminal ', i+1);
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Error handling function                                          |
+//+------------------------------------------------------------------+
+void OnTradeError(const int error)
+{
+   Print('Trade execution error: ', error);
+}
+
+//+------------------------------------------------------------------+
+//| Expert start function                                            |
+//+------------------------------------------------------------------+
+void OnStart()
+{
+   // Main loop
+   while(!IsStopped())
+   {
+      OnTick();
+      Sleep(1000); // Adjust the sleep time based on your requirements
+   }
+}
